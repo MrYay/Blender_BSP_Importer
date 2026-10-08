@@ -503,6 +503,15 @@ class ID3Model:
         return width, height
 
     def add_bsp_patch(self, bsp, face, import_settings):
+
+        force_nodraw = False
+        if import_settings.preset not in ["BRUSHES", "SHADOW_BRUSHES"]:
+            shaders_lump = bsp.lumps["shaders"]
+            force_nodraw = shaders_lump[face.texture].flags == 0x00200000
+        
+        if import_settings.preset == "RENDERING" and force_nodraw:
+            return
+        
         drawverts_lump = bsp.lumps["drawverts"]
         width = int(face.patch_width-1)
         height = int(face.patch_height-1)
@@ -545,11 +554,6 @@ class ID3Model:
                         self.add_new_vertex_to_bsp(
                             bsp, self.ctrlPoints[j][i]))
                 bsp_index_list.append(fixed_bsp_indices[j][i])
-
-        force_nodraw = False
-        if import_settings.preset not in ["BRUSHES", "SHADOW_BRUSHES"]:
-            shaders_lump = bsp.lumps["shaders"]
-            force_nodraw = shaders_lump[face.texture].flags == 0x00200000
 
         for patch_face_index in range(width*height + height - 1):
             # end of row?

@@ -2066,9 +2066,9 @@ class PatchBspData(bpy.types.Operator, ExportHelper):
         # store lightmaps
         if self.patch_lightmaps:
             lightmap_image = bpy.data.images.get(self.lightmap_to_use)
-            if lightmap_image is None:
+            if lightmap_image is None and not self.patch_external:
                 self.report(
-                    {"ERROR"}, "Could not find selected lightmap atlas")
+                    {"ERROR"}, f"Could not find selected lightmap atlas '{self.lightmap_to_use}'")
                 return {'CANCELLED'}
             self.report({"INFO"}, "Storing Lightmaps...")
             success, message = QuakeLight.storeLighmaps(

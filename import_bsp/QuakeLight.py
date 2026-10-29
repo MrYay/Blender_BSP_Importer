@@ -1,6 +1,7 @@
 import bpy
 import os
 import struct
+from numpy import flipud, asarray, reshape, ravel
 from mathutils import Vector
 from math import floor, ceil, pi, pow, atan2, sqrt, acos, isnan
 from . import GridIcoSphere
@@ -134,8 +135,7 @@ def storeLighmaps(bsp,
     lm_size = bsp.lightmap_size
     color_components = 4
     color_scale = 1.0 / (pow(2.0, float(light_settings.overbright_bits)))
-
-    if image is None:
+    if image is None and internal:
         return False, "No image found for patching"
 
     local_pixels = list(image.pixels[:])
@@ -228,21 +228,30 @@ def storeLighmaps(bsp,
         image_settings.color_mode = 'RGB'
         img_name = "lm_export_buffer"
 
-        for lightmap in range(n_lightmaps):
-            image = bpy.data.images.get(img_name)
-            if image is None:
-                image = bpy.data.images.new(
-                    img_name,
-                    width=lm_size[0],
-                    height=lm_size[1],
-                    float_buffer=True)
-                image.colorspace_settings.name = color_space
-                image.file_format = file_type
+        # save imported (nrc extlmhack) external lightmaps
+        extlms = [im for im in bpy.data.images if "lm_" in im.name and im.source == 'FILE']
+        if extlms:
+            for lm in extlms:
+                if flip:
+                    lm.pixels = flipud(asarray(lm.pixels).reshape(lm.size[0],lm.size[1],4)).ravel()
+                lm.file_format = file_type
+                lm.save(filepath=lm.filepath_raw)
+        else:
+            for lightmap in range(n_lightmaps):
+                image = bpy.data.images.get(img_name)
+                if image is None:
+                    image = bpy.data.images.new(
+                        img_name,
+                        width=lm_size[0],
+                        height=lm_size[1],
+                        float_buffer=True)
+                    image.colorspace_settings.name = color_space
+                    image.file_format = file_type
 
-            image.filepath_raw = bsp_path + "lm_" + \
-                str(lightmap).zfill(4) + file_ext.lower()
-            image.pixels = lightmaps[lightmap]
-            image.save_render(image.filepath_raw, scene=bpy.context.scene)
+                image.filepath_raw = bsp_path + "lm_" + \
+                    str(lightmap).zfill(4) + file_ext.lower()
+                image.pixels = lightmaps[lightmap]
+                image.save_render(image.filepath_raw, scene=bpy.context.scene)
 
     if internal and not hdr:
         return True, "Lightmaps succesfully added to BSP"

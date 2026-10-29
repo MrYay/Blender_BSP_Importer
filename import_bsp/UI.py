@@ -1272,6 +1272,8 @@ class Q3_PT_ShaderPanel(bpy.types.Panel):
                 col.prop(scale, "default_value",
                          text="Extra Shader Emission Scale")
 
+        row = layout.row()
+        row.operator("q3mapping.toggle_lightmap_preview")
 
 class Q3_PT_EntityPanel(bpy.types.Panel):
     bl_idname = "Q3_PT_entity_panel"
@@ -2443,6 +2445,66 @@ class Reload_render_shader(bpy.types.Operator):
 
         return {'FINISHED'}
 
+class Toggle_lightmap_preview(bpy.types.Operator):
+    """Toggle lightmap preview within lightmapped worldspawn shaders"""
+    bl_idname = "q3mapping.toggle_lightmap_preview"
+    bl_label = "Toggle Lightmap Preview"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(self, context):
+        return bpy.data.objects.get('worldspawn') is not None
+
+    def execute(self, context):
+
+        worldspawn = bpy.data.objects['worldspawn']
+
+        world_materials = [m.material for m in worldspawn.material_slots]
+        lightmap_materials = set()
+        for mat in world_materials:
+            for node in mat.node_tree.nodes:
+                if node.name == 'Baking Image':
+                    if "lm_" in node.image.name:
+                        lightmap_materials.add(mat)
+
+        for m in lightmap_materials:
+
+            if not m.node_tree.nodes.get("Principled BSDF"):
+                print(f"No Principled BSDF node found in material '{m.name}'")
+                continue
+
+            bsdf_color_link = \
+                [l for l in m.node_tree.links if
+                 "Principled BSDF" in l.to_node.name and "Base Color" in l.to_socket.name][0]
+            bsdf_node = bsdf_color_link.to_node
+
+            if not m.node_tree.nodes.get("basecolor_reroute"):
+                # create the reroute node if not found
+                reroute_pos_x = bsdf_color_link.from_node.location.x + (
+                        (bsdf_color_link.to_node.location.x - bsdf_color_link.from_node.location.x) / 2)
+                reroute_node = m.node_tree.nodes.new("NodeReroute")
+                reroute_node.name = "basecolor_reroute"
+                reroute_node.location.x = reroute_pos_x
+                reroute_node.location.y = bsdf_color_link.from_node.location.y + 100
+                m.node_tree.links.new(reroute_node.outputs[0], bsdf_node.inputs["Base Color"])
+                m.node_tree.links.new(bsdf_color_link.from_node.outputs[bsdf_color_link.from_socket.name],
+                                      reroute_node.inputs[0])
+                bsdf_color_link = \
+                    [l for l in m.node_tree.links if
+                     "Principled BSDF" in l.to_node.name and "Base Color" in l.to_socket.name][0]
+            else:
+                reroute_node = m.node_tree.nodes.get("basecolor_reroute")
+
+            if "basecolor_reroute" in bsdf_color_link.from_node.name:
+                # plug the lightmap image into the bsdf node
+                m.node_tree.links.remove(bsdf_color_link)
+                lm_node = m.node_tree.nodes.get("Baking Image")
+                m.node_tree.links.new(lm_node.outputs["Color"], bsdf_node.inputs["Base Color"])
+            else:
+                # plug the original texture into the bsdf node
+                m.node_tree.links.new(reroute_node.outputs[0], bsdf_node.inputs["Base Color"])
+
+        return {'FINISHED'}
 
 class FillAssetLibrary(bpy.types.Operator):
     """Fill asset library with models"""

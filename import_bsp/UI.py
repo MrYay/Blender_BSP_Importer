@@ -20,6 +20,7 @@ from . import QuakeShader, QuakeSky, QuakeLight, ShaderNodes
 from .idtech3lib import Helpers, Parsing, GamePacks
 from .idtech3lib.ID3VFS import Q3VFS
 from .idtech3lib.ImportSettings import *
+from numpy import flipud, asarray, reshape, ravel
 
 
 def get_base_paths(context, import_file_path = None):
@@ -2474,13 +2475,21 @@ class Toggle_lightmap_preview(bpy.types.Operator):
                         lightmap_materials.add(mat)
                         continue
                     if "$lightmap_bake" in node.image.name and node.image.source == 'GENERATED':
-                        imported_lm = bpy.data.images.get("$lightmap")
+                        imported_lm_image = bpy.data.images.get("$lightmap")
+                        # in some cases the internal lightmap is imported as "lm_000x" ?
+                        lm_images = [im for im in bpy.data.images if "lm_" in im.name]
+                        lm_nodes = [n for n in mat.node_tree.nodes if "Baking Image" in n.name and "lm_" in n.image.name]
+                        if not imported_lm_image and lm_images and not lm_nodes:
+                            imported_lm_image = lm_images[0]
+                            imported_lm_image.pixels = (flipud(asarray(imported_lm_image.pixels)
+                                                        .reshape(imported_lm_image.size[0], imported_lm_image.size[1], 4))
+                                                        .ravel())
                         baking_images_file_nodes = [node for node in mat.node_tree.nodes
                                                     if "Baking Image" in node.name and node.image.source == 'FILE']
-                        # if there is an imported internal lightmap, add it to a new node
-                        if imported_lm and not baking_images_file_nodes:
+                        # if there is an imported internal lightmap image not in the node tree, add it to a new node
+                        if imported_lm_image and not baking_images_file_nodes:
                             internal_lm_node = mat.node_tree.nodes.new(type='ShaderNodeTexImage')
-                            internal_lm_node.image = imported_lm
+                            internal_lm_node.image = imported_lm_image
                             internal_lm_node.name = "Baking Image"
                             lm_uv_node = mat.node_tree.nodes.get("tcLightmap")
                             mat.node_tree.links.new(lm_uv_node.outputs["UV"], internal_lm_node.inputs["Vector"])
@@ -2519,20 +2528,17 @@ class Toggle_lightmap_preview(bpy.types.Operator):
                 # plug the lightmap image into the bsdf node
 
                 lm_node = None
-                if self.toggle_baked_lightmaps:
-                    baking_images_generated_nodes = [node for node in m.node_tree.nodes
-                                                     if "Baking Image" in node.name and node.image.source == 'GENERATED']
-                    if baking_images_generated_nodes:
-                        lm_node = baking_images_generated_nodes[0]
-                else:
-                    baking_images_file_nodes = [node for node in m.node_tree.nodes
-                                                if "Baking Image" in node.name and node.image.source == 'FILE']
-                    if baking_images_file_nodes:
-                        lm_node = baking_images_file_nodes[0]
+                lm_source = 'GENERATED' if self.toggle_baked_lightmaps else 'FILE'
+                lm_image_nodes = [node for node in m.node_tree.nodes
+                                                 if "Baking Image" in node.name and node.image.source == lm_source]
+                if lm_image_nodes:
+                    lm_node = lm_image_nodes[0]
 
                 if lm_node:
                     m.node_tree.links.remove(bsdf_color_link)
                     m.node_tree.links.new(lm_node.outputs["Color"], bsdf_node.inputs["Base Color"])
+                    lm_node.select = True
+                    m.node_tree.nodes.active = lm_node
             else:
                 # plug the original texture into the bsdf node
                 m.node_tree.links.new(reroute_node.outputs[0], bsdf_node.inputs["Base Color"])

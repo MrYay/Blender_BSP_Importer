@@ -1273,7 +1273,11 @@ class Q3_PT_ShaderPanel(bpy.types.Panel):
                          text="Extra Shader Emission Scale")
 
         row = layout.row()
-        row.operator("q3mapping.toggle_lightmap_preview")
+        lmprev = row.operator("q3mapping.toggle_lightmap_preview", text="Toggle Imported Lightmap Preview")
+        lmprev.toggle_baked_lightmaps = False
+        row = layout.row()
+        blmprev = row.operator("q3mapping.toggle_lightmap_preview", text="Toggle Baked Lightmap Preview")
+        blmprev.toggle_baked_lightmaps = True
 
 class Q3_PT_EntityPanel(bpy.types.Panel):
     bl_idname = "Q3_PT_entity_panel"
@@ -2451,6 +2455,8 @@ class Toggle_lightmap_preview(bpy.types.Operator):
     bl_label = "Toggle Lightmap Preview"
     bl_options = {'REGISTER', 'UNDO'}
 
+    toggle_baked_lightmaps: BoolProperty(name="Toggle baked lightmaps", default=False)
+
     @classmethod
     def poll(self, context):
         return bpy.data.objects.get('worldspawn') is not None
@@ -2462,10 +2468,24 @@ class Toggle_lightmap_preview(bpy.types.Operator):
         world_materials = [m.material for m in worldspawn.material_slots]
         lightmap_materials = set()
         for mat in world_materials:
-            for node in mat.node_tree.nodes:
+            for node in mat.node_tree.nodes[:]:
                 if node.name == 'Baking Image':
                     if "lm_" in node.image.name:
                         lightmap_materials.add(mat)
+                        continue
+                    if "$lightmap_bake" in node.image.name and node.image.source == 'GENERATED':
+                        imported_lm = bpy.data.images.get("$lightmap")
+                        baking_images_file_nodes = [node for node in mat.node_tree.nodes
+                                                    if "Baking Image" in node.name and node.image.source == 'FILE']
+                        # if there is an imported internal lightmap, add it to a new node
+                        if imported_lm and not baking_images_file_nodes:
+                            internal_lm_node = mat.node_tree.nodes.new(type='ShaderNodeTexImage')
+                            internal_lm_node.image = imported_lm
+                            internal_lm_node.name = "Baking Image"
+                            lm_uv_node = mat.node_tree.nodes.get("tcLightmap")
+                            mat.node_tree.links.new(lm_uv_node.outputs["UV"], internal_lm_node.inputs["Vector"])
+                        lightmap_materials.add(mat)
+                        continue
 
         for m in lightmap_materials:
 
@@ -2497,9 +2517,22 @@ class Toggle_lightmap_preview(bpy.types.Operator):
 
             if "basecolor_reroute" in bsdf_color_link.from_node.name:
                 # plug the lightmap image into the bsdf node
-                m.node_tree.links.remove(bsdf_color_link)
-                lm_node = m.node_tree.nodes.get("Baking Image")
-                m.node_tree.links.new(lm_node.outputs["Color"], bsdf_node.inputs["Base Color"])
+
+                lm_node = None
+                if self.toggle_baked_lightmaps:
+                    baking_images_generated_nodes = [node for node in m.node_tree.nodes
+                                                     if "Baking Image" in node.name and node.image.source == 'GENERATED']
+                    if baking_images_generated_nodes:
+                        lm_node = baking_images_generated_nodes[0]
+                else:
+                    baking_images_file_nodes = [node for node in m.node_tree.nodes
+                                                if "Baking Image" in node.name and node.image.source == 'FILE']
+                    if baking_images_file_nodes:
+                        lm_node = baking_images_file_nodes[0]
+
+                if lm_node:
+                    m.node_tree.links.remove(bsdf_color_link)
+                    m.node_tree.links.new(lm_node.outputs["Color"], bsdf_node.inputs["Base Color"])
             else:
                 # plug the original texture into the bsdf node
                 m.node_tree.links.new(reroute_node.outputs[0], bsdf_node.inputs["Base Color"])
